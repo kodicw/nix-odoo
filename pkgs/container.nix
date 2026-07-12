@@ -1,4 +1,11 @@
-{ dockerTools, writeShellScript, runCommand, lib, addonPackages ? [ ], baseConfigFile }:
+{
+  dockerTools,
+  writeShellScript,
+  runCommand,
+  lib,
+  addonPackages ? [ ],
+  baseConfigFile,
+}:
 
 let
   odooImage = dockerTools.pullImage {
@@ -81,6 +88,8 @@ dockerTools.buildImage {
   copyToRoot = [ rootLayer ];
   config = {
     Entrypoint = [ "/entrypoint-wrapper.sh" ];
-    ExposedPorts = { "8069/tcp" = { }; };
+    ExposedPorts = {
+      "8069/tcp" = { };
+    };
   };
 }

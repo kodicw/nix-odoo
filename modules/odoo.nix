@@ -1,11 +1,16 @@
-{ config, pkgs, lib, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  ...
+}:
 
 with lib;
 
 let
   cfg = config.services.odoo;
   format = pkgs.formats.ini { };
-  odooLib = import ./default.nix { inherit pkgs lib; };
+  odooLib = import ../lib/default.nix { inherit pkgs lib; };
 
   # Schema for page options
   pageOpts = types.submodule {
@@ -43,6 +48,11 @@ let
         default = { };
         description = "Declarative pages registry under the website domain.";
       };
+      pythonFiles = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        description = "Declarative Python files to include in the addon (e.g. controllers, models).";
+      };
     };
   };
 
@@ -79,6 +89,11 @@ in
               default = true;
               description = "Enables proxy mode support.";
             };
+            addons_path = mkOption {
+              type = types.str;
+              default = "/usr/lib/python3/dist-packages/odoo/addons,/mnt/extra-addons";
+              description = "Path to Odoo addons directories.";
+            };
           };
         };
         freeformType = format.type;
@@ -110,14 +125,14 @@ in
 
   config = mkIf cfg.enable (
     let
-      websiteAddons = mapAttrsToList
-        (name: webConfig:
-          odooLib.mkOdooAddon {
-            name = "pgmsp_website_${name}";
-            pages = webConfig.pages;
-          }
-        )
-        cfg.website;
+      websiteAddons = mapAttrsToList (
+        name: webConfig:
+        odooLib.mkOdooAddon {
+          name = "pgmsp_website_${name}";
+          pages = webConfig.pages;
+          pythonFiles = webConfig.pythonFiles;
+        }
+      ) cfg.website;
 
       allAddons = cfg.addons ++ websiteAddons;
       cfgFile = format.generate "odoo.cfg" cfg.settings;
@@ -126,7 +141,7 @@ in
       services.odoo.configFile = cfgFile;
       services.odoo.addonPackages = allAddons;
 
-      services.odoo.container = pkgs.callPackage ./container.nix {
+      services.odoo.container = pkgs.callPackage ../pkgs/container.nix {
         addonPackages = allAddons;
         baseConfigFile = cfgFile;
       };

@@ -1,45 +1,45 @@
 { pkgs, lib }:
 
-rec {
-  # Build a declarative Odoo module from Nix attributes
+let
   mkOdooAddon =
-    { name
-    , version ? "1.0.0"
-    , depends ? [ "website" ]
-    , pages ? { }
-    , # url -> { id, name, template ? "", templateFile ? null, groups ? [] }
-      pythonFiles ? { }
-    , # filepath -> python code string
+    # Build a declarative Odoo module from Nix attributes
+    {
+      name,
+      version ? "1.0.0",
+      depends ? [ "website" ],
+      pages ? { }, # url -> { id, name, template ? "", templateFile ? null, groups ? [] }
+      pythonFiles ? { }, # filepath -> python code string
     }:
     let
-      # Evaluation-time assertions
-      validatePage =
-        url: p:
-        let
-          template = if p ? template then p.template else null;
-          templateFile = if p ? templateFile then p.templateFile else null;
-        in
-        assert lib.assertMsg (p ? id) "Odoo Page URL '${url}' must specify a string 'id'";
-        assert lib.assertMsg (p ? name) "Odoo Page '${p.id}' must specify a 'name'";
-        assert lib.assertMsg
-          (
-            template != null || templateFile != null
-          ) "Odoo Page '${p.id}' must specify 'template' or 'templateFile'";
-        assert lib.assertMsg
-          (
-            !(template != null && templateFile != null)
-          ) "Odoo Page '${p.id}' cannot specify both 'template' and 'templateFile'";
-        p;
-
-      validatedPages = lib.mapAttrs (url: p: validatePage url p) pages;
-
-      getPageTemplate =
+      getTemplate =
         p:
         let
           template = if p ? template then p.template else null;
           templateFile = if p ? templateFile then p.templateFile else null;
         in
         if templateFile != null then builtins.readFile templateFile else template;
+
+      # Evaluation-time assertions
+      validatePage =
+        url: p:
+        let
+          template = getTemplate p;
+          hasTemplate = p ? template && p.template != null;
+          hasTemplateFile = p ? templateFile && p.templateFile != null;
+        in
+        assert lib.assertMsg (p ? id) "Odoo Page URL '${url}' must specify a string 'id'";
+        assert lib.assertMsg (p ? name) "Odoo Page '${p.id}' must specify a 'name'";
+        assert lib.assertMsg (
+          template != null
+        ) "Odoo Page '${p.id}' must specify 'template' or 'templateFile'";
+        assert lib.assertMsg (
+          !(hasTemplate && hasTemplateFile)
+        ) "Odoo Page '${p.id}' cannot specify both 'template' and 'templateFile'";
+        p;
+
+      validatedPages = lib.mapAttrs (url: p: validatePage url p) pages;
+
+      getPageTemplate = getTemplate;
 
       pagesXml = ''
         <?xml version="1.0" encoding="utf-8"?>
@@ -131,21 +131,21 @@ rec {
           if [ "$(basename "$dir")" = "views" ]; then
             continue
           fi
-          
+
           init_file="$dir/__init__.py"
           if [ -f "$init_file" ] && [ -s "$init_file" ]; then
             echo "Preserving user-defined $init_file"
             continue
           fi
-          
+
           > "$init_file"
-          
+
           # Add .py file imports (except __init__.py and __manifest__.py)
           find "$dir" -maxdepth 1 -name "*.py" ! -name "__init__.py" ! -name "__manifest__.py" | while read -r pyfile; do
             mod_name=$(basename "$pyfile" .py)
             echo "from . import $mod_name" >> "$init_file"
           done
-          
+
           # Add subdirectory imports if they contain __init__.py
           find "$dir" -maxdepth 1 -mindepth 1 -type d | while read -r subdir; do
             if [ -f "$subdir/__init__.py" ]; then
@@ -162,83 +162,91 @@ rec {
       installPhase = "true";
     };
 
-  # Helper to evaluate Odoo configurations
-  evalOdoo =
-    { modules
-    , pkgs
-    , lib ? pkgs.lib
-    , specialArgs ? { }
-    ,
+  mkOdooModule =
+    {
+      name,
+      src,
+      version ? "1.0.0",
+      checkSchema ? false,
+      odoo ? null,
+      postgresql ? null,
     }:
-    let
-      eval = lib.evalModules {
-        modules = [
-          ./module.nix
-        ]
-        ++ modules;
-        specialArgs = {
-          inherit pkgs;
-        }
-        // specialArgs;
-      };
-    in
-    eval.config.services.odoo;
-
-  # A builder function that evaluates Odoo stack configurations in the Odoo Nix module system
-  odooSystem =
-    { modules
-    , pkgs
-    , lib ? pkgs.lib
-    , specialArgs ? { }
-    ,
-    }:
-    let
-      eval = lib.evalModules {
-        modules = [
-          ./module.nix
-        ]
-        ++ modules;
-        specialArgs = {
-          inherit pkgs;
-        }
-        // specialArgs;
-      };
-    in
-    eval.config.services.odoo.container;
-
-  # A generic builder for standard directory-based Odoo addons
-  buildOdooAddon =
-    { pname
-    , src
-    , version ? "1.0.0"
-    , meta ? { }
-    }:
+    assert lib.assertMsg (
+      checkSchema -> odoo != null && postgresql != null
+    ) "When checkSchema is enabled, both 'odoo' and 'postgresql' packages must be provided.";
     pkgs.stdenvNoCC.mkDerivation {
-      inherit pname version src;
+      pname = name;
+      inherit version;
+      src = src;
 
-      nativeBuildInputs = [ pkgs.libxml2 pkgs.python3 ];
+      nativeBuildInputs = [
+        pkgs.libxml2
+        pkgs.python3
+      ]
+      ++ lib.optionals checkSchema [
+        odoo
+        postgresql
+      ];
 
-      buildPhase = ''
-        echo "Validating Odoo manifest..."
-        if [ ! -f __manifest__.py ]; then
-          echo "Error: __manifest__.py not found in source!" >&2
+      installPhase = ''
+        runHook preInstall
+
+        mkdir -p $out/${name}
+        cp -r ./* $out/${name}/
+
+        # Check that manifest exists
+        if [ ! -f "$out/${name}/__manifest__.py" ]; then
+          echo "ERROR: Odoo module manifest '__manifest__.py' not found in source!" >&2
           exit 1
         fi
-        python3 -c "import ast; ast.parse(open('__manifest__.py').read())" || {
-          echo "Error: __manifest__.py contains invalid Python syntax!" >&2
-          exit 1
-        }
 
-        echo "Validating XML views..."
-        find . -name "*.xml" -exec xmllint --noout {} +
+        # Validate python compilation
+        echo "Validating Python files compile successfully..."
+        python3 -m compileall -q "$out/${name}"
 
-        # Create output directory structure
-        mkdir -p $out/${pname}
-        cp -r * $out/${pname}/
+        # Validate XML files
+        echo "Validating XML files..."
+        find "$out/${name}" -name "*.xml" | while read -r xmlfile; do
+          echo "Checking $xmlfile..."
+          xmllint --noout "$xmlfile"
+        done
+
+        # If schema checking is enabled, perform E2E database verification
+        if [ "${toString checkSchema}" = "1" ]; then
+          echo "Starting sandboxed PostgreSQL and Odoo schema validation..."
+          export PGDATA=$TMPDIR/postgres
+          export HOME=$TMPDIR
+          
+          # Initialize PostgreSQL database cluster
+          initdb --no-locale --encoding=UTF8 -U odoo_user
+          
+          # Configure PostgreSQL settings in postgresql.conf
+          echo "unix_socket_directories = '/tmp'" >> $PGDATA/postgresql.conf
+          echo "listen_addresses = '''" >> $PGDATA/postgresql.conf
+          
+          # Start PostgreSQL server
+          pg_ctl start
+          
+          # Create odoo database
+          createdb -h "/tmp" -U odoo_user -E UTF8 odoo
+          
+          # Run Odoo to install this module
+          odoo -d odoo \
+               --db_host="/tmp" \
+               --db_user=odoo_user \
+               --addons-path="$out" \
+               -i ${name} \
+               --stop-after-init
+               
+          # Cleanly stop PostgreSQL
+          pg_ctl stop
+          echo "SUCCESS: Sandboxed database schema validation passed."
+        fi
+
+        runHook postInstall
       '';
-
-      installPhase = "true";
-
-      inherit meta;
     };
+in
+{
+  inherit mkOdooAddon mkOdooModule;
 }
