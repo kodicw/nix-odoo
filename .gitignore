@@ -1,0 +1,7 @@
+result
+result-*
+.direnv/
+.devenv/
+.nix-mix/
+.nix-hex/
+.nix-profile/
