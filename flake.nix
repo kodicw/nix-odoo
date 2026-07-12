@@ -132,12 +132,43 @@
             odoo = pkgs.odoo;
             postgresql = pkgs.postgresql;
           };
+        example-theme =
+          let
+            odooLib = self.lib { inherit pkgs; };
+          in
+          odooLib.mkOdooTheme {
+            name = "theme_pgmsp_example";
+            scss = ''
+              :root {
+                --primary: #52b788;
+                --body-bg: #121212;
+              }
+              body {
+                background-color: var(--body-bg);
+                color: #ffffff;
+              }
+            '';
+            js = ''
+              console.log("Theme loaded successfully!");
+            '';
+            views = ''
+              <?xml version="1.0" encoding="utf-8"?>
+              <odoo>
+                <template id="custom_footer" inherit_id="website.layout">
+                  <xpath expr="//footer" position="replace">
+                    <footer>Custom PGMSP Footer</footer>
+                  </xpath>
+                </template>
+              </odoo>
+            '';
+          };
       });
 
       checks = forAllSystems (pkgs: {
         eval-test = self.packages.${pkgs.system}.example-container;
         local-addon-test = self.packages.${pkgs.system}.example-local-addon;
         local-addon-db-test = self.packages.${pkgs.system}.example-local-addon-db;
+        theme-test = self.packages.${pkgs.system}.example-theme;
       });
     };
 }

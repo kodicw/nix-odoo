@@ -5,6 +5,6 @@ let
   system = import ./system.nix { inherit pkgs lib; };
 in
 {
-  inherit (addon) mkOdooAddon mkOdooModule;
+  inherit (addon) mkOdooAddon mkOdooModule mkOdooTheme;
   inherit (system) evalOdoo odooSystem;
 }

@@ -1,6 +1,23 @@
 { pkgs, lib }:
 
 let
+  toPython =
+    val:
+    if builtins.isAttrs val then
+      "{\n"
+      + (lib.concatStringsSep ",\n" (
+        lib.mapAttrsToList (k: v: "  ${builtins.toJSON k}: ${toPython v}") val
+      ))
+      + "\n}"
+    else if builtins.isList val then
+      "[ " + (lib.concatStringsSep ", " (map toPython val)) + " ]"
+    else if builtins.isBool val then
+      (if val then "True" else "False")
+    else if val == null then
+      "None"
+    else
+      builtins.toJSON val;
+
   mkOdooAddon =
     # Build a declarative Odoo module from Nix attributes
     {
@@ -73,24 +90,6 @@ let
           )}
         </odoo>
       '';
-
-      toPython =
-        val:
-        if builtins.isAttrs val then
-          "{\n"
-          + (lib.concatStringsSep ",\n" (
-            lib.mapAttrsToList (k: v: "  ${builtins.toJSON k}: ${toPython v}") val
-          ))
-          + "\n}"
-        else if builtins.isList val then
-          "[ " + (lib.concatStringsSep ", " (map toPython val)) + " ]"
-        else if builtins.isBool val then
-          (if val then "True" else "False")
-        else if val == null then
-          "None"
-        else
-          builtins.toJSON val;
-
       manifest = {
         name = name;
         version = version;
@@ -248,7 +247,77 @@ let
         runHook postInstall
       '';
     };
+  mkOdooTheme =
+    {
+      name,
+      version ? "1.0.0",
+      depends ? [ "website" ],
+      scss ? null,
+      js ? null,
+      views ? null,
+    }:
+    let
+      scssPath = "static/src/scss/theme.scss";
+      jsPath = "static/src/js/theme.js";
+      viewsPath = "views/templates.xml";
+
+      assetsList =
+        (lib.optional (scss != null) "${name}/${scssPath}")
+        ++ (lib.optional (js != null) "${name}/${jsPath}");
+
+      manifest = {
+        name = name;
+        version = version;
+        depends = depends;
+        data = lib.optional (views != null) viewsPath;
+        assets = lib.optionalAttrs (assetsList != [ ]) {
+          "web.assets_frontend" = assetsList;
+        };
+        installable = true;
+        auto_install = false;
+        application = false;
+      };
+
+      manifestStr = toPython manifest;
+    in
+    pkgs.stdenvNoCC.mkDerivation {
+      pname = name;
+      inherit version;
+      dontUnpack = true;
+      nativeBuildInputs = [ pkgs.libxml2 ];
+
+      buildPhase = ''
+        mkdir -p $out/${name}
+        echo '${manifestStr}' > $out/${name}/__manifest__.py
+        touch $out/${name}/__init__.py
+
+        ${lib.optionalString (scss != null) ''
+          mkdir -p "$out/${name}/static/src/scss"
+          cat <<'EOF' > "$out/${name}/${scssPath}"
+          ${scss}
+          EOF
+        ''}
+
+        ${lib.optionalString (js != null) ''
+          mkdir -p "$out/${name}/static/src/js"
+          cat <<'EOF' > "$out/${name}/${jsPath}"
+          ${js}
+          EOF
+        ''}
+
+        ${lib.optionalString (views != null) ''
+          mkdir -p "$out/${name}/views"
+          cat <<'EOF' > "$out/${name}/${viewsPath}"
+          ${views}
+          EOF
+          echo "Validating theme XML templates..."
+          xmllint --noout "$out/${name}/${viewsPath}"
+        ''}
+      '';
+
+      installPhase = "true";
+    };
 in
 {
-  inherit mkOdooAddon mkOdooModule;
+  inherit mkOdooAddon mkOdooModule mkOdooTheme;
 }
