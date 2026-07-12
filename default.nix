@@ -103,4 +103,16 @@ rec {
       };
     in
     eval.config.services.odoo;
+
+  # A builder function that evaluates Odoo stack configurations in the Odoo Nix module system
+  odooSystem = { modules, pkgs, lib ? pkgs.lib, specialArgs ? { } }:
+    let
+      eval = lib.evalModules {
+        modules = [
+          ./module.nix
+        ] ++ modules;
+        specialArgs = { inherit pkgs; } // specialArgs;
+      };
+    in
+    eval.config.services.odoo.container;
 }

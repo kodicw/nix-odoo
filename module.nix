@@ -46,7 +46,8 @@ let
     };
   };
 
-in {
+in
+{
   options.services.odoo = {
     enable = mkEnableOption "odoo stack configuration";
 
@@ -98,20 +99,37 @@ in {
       readOnly = true;
       description = "All addon packages, including nix-compiled website pages.";
     };
+
+    # The resulting container package (compiled output)
+    container = mkOption {
+      type = types.package;
+      readOnly = true;
+      description = "Fully compiled Odoo container image package.";
+    };
   };
 
   config = mkIf cfg.enable (
     let
-      websiteAddons = mapAttrsToList (name: webConfig:
-        odooLib.mkOdooAddon {
-          name = "pgmsp_website_${name}";
-          pages = webConfig.pages;
-        }
-      ) cfg.website;
+      websiteAddons = mapAttrsToList
+        (name: webConfig:
+          odooLib.mkOdooAddon {
+            name = "pgmsp_website_${name}";
+            pages = webConfig.pages;
+          }
+        )
+        cfg.website;
+
+      allAddons = cfg.addons ++ websiteAddons;
+      cfgFile = format.generate "odoo.cfg" cfg.settings;
     in
     {
-      services.odoo.configFile = format.generate "odoo.cfg" cfg.settings;
-      services.odoo.addonPackages = cfg.addons ++ websiteAddons;
+      services.odoo.configFile = cfgFile;
+      services.odoo.addonPackages = allAddons;
+
+      services.odoo.container = pkgs.callPackage ./container.nix {
+        addonPackages = allAddons;
+        baseConfigFile = cfgFile;
+      };
     }
   );
 }
