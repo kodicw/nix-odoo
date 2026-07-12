@@ -221,18 +221,20 @@ let
           initdb --no-locale --encoding=UTF8 -U odoo_user
           
           # Configure PostgreSQL settings in postgresql.conf
-          echo "unix_socket_directories = '/tmp'" >> $PGDATA/postgresql.conf
+          # Using a unique subdirectory inside /tmp avoids socket file collisions
+          SOCKET_DIR=$(mktemp -d /tmp/pg-socket-XXXXXX)
+          echo "unix_socket_directories = '$SOCKET_DIR'" >> $PGDATA/postgresql.conf
           echo "listen_addresses = '''" >> $PGDATA/postgresql.conf
           
           # Start PostgreSQL server
           pg_ctl start
           
           # Create odoo database
-          createdb -h "/tmp" -U odoo_user -E UTF8 odoo
+          createdb -h "$SOCKET_DIR" -U odoo_user -E UTF8 odoo
           
           # Run Odoo to install this module
           odoo -d odoo \
-               --db_host="/tmp" \
+               --db_host="$SOCKET_DIR" \
                --db_user=odoo_user \
                --addons-path="$out" \
                -i ${name} \
