@@ -20,12 +20,13 @@ let
 
   mkOdooAddon =
     # Build a declarative Odoo module from Nix attributes
-    {
-      name,
-      version ? "1.0.0",
-      depends ? [ "website" ],
-      pages ? { }, # url -> { id, name, template ? "", templateFile ? null, groups ? [] }
-      pythonFiles ? { }, # filepath -> python code string
+    { name
+    , version ? "1.0.0"
+    , depends ? [ "website" ]
+    , pages ? { }
+    , # url -> { id, name, template ? "", templateFile ? null, groups ? [] }
+      pythonFiles ? { }
+    , # filepath -> python code string
     }:
     let
       getTemplate =
@@ -46,12 +47,14 @@ let
         in
         assert lib.assertMsg (p ? id) "Odoo Page URL '${url}' must specify a string 'id'";
         assert lib.assertMsg (p ? name) "Odoo Page '${p.id}' must specify a 'name'";
-        assert lib.assertMsg (
-          template != null
-        ) "Odoo Page '${p.id}' must specify 'template' or 'templateFile'";
-        assert lib.assertMsg (
-          !(hasTemplate && hasTemplateFile)
-        ) "Odoo Page '${p.id}' cannot specify both 'template' and 'templateFile'";
+        assert lib.assertMsg
+          (
+            template != null
+          ) "Odoo Page '${p.id}' must specify 'template' or 'templateFile'";
+        assert lib.assertMsg
+          (
+            !(hasTemplate && hasTemplateFile)
+          ) "Odoo Page '${p.id}' cannot specify both 'template' and 'templateFile'";
         p;
 
       validatedPages = lib.mapAttrs (url: p: validatePage url p) pages;
@@ -162,117 +165,132 @@ let
     };
 
   mkOdooModule =
-    {
-      name,
-      src,
-      version ? "1.0.0",
-      checkSchema ? false,
-      odoo ? null,
-      postgresql ? null,
+    { name
+    , src
+    , version ? "1.0.0"
+    , checkSchema ? false
+    , odoo ? null
+    , postgresql ? null
+    ,
     }:
-    assert lib.assertMsg (
-      checkSchema -> odoo != null && postgresql != null
-    ) "When checkSchema is enabled, both 'odoo' and 'postgresql' packages must be provided.";
-    pkgs.stdenvNoCC.mkDerivation {
-      pname = name;
-      inherit version;
-      src = src;
+      assert lib.assertMsg
+        (
+          checkSchema -> odoo != null && postgresql != null
+        ) "When checkSchema is enabled, both 'odoo' and 'postgresql' packages must be provided.";
+      pkgs.stdenvNoCC.mkDerivation {
+        pname = name;
+        inherit version;
+        src = src;
 
-      nativeBuildInputs = [
-        pkgs.libxml2
-        pkgs.python3
-      ]
-      ++ lib.optionals checkSchema [
-        odoo
-        postgresql
-      ];
+        nativeBuildInputs = [
+          pkgs.libxml2
+          pkgs.python3
+        ]
+        ++ lib.optionals checkSchema [
+          odoo
+          postgresql
+        ];
 
-      installPhase = ''
-        runHook preInstall
+        installPhase = ''
+          runHook preInstall
 
-        mkdir -p $out/${name}
-        cp -r ./* $out/${name}/
+          mkdir -p $out/${name}
+          cp -r ./* $out/${name}/
 
-        # Check that manifest exists
-        if [ ! -f "$out/${name}/__manifest__.py" ]; then
-          echo "ERROR: Odoo module manifest '__manifest__.py' not found in source!" >&2
-          exit 1
-        fi
+          # Check that manifest exists
+          if [ ! -f "$out/${name}/__manifest__.py" ]; then
+            echo "ERROR: Odoo module manifest '__manifest__.py' not found in source!" >&2
+            exit 1
+          fi
 
-        # Validate python compilation
-        echo "Validating Python files compile successfully..."
-        python3 -m compileall -q "$out/${name}"
+          # Validate python compilation
+          echo "Validating Python files compile successfully..."
+          python3 -m compileall -q "$out/${name}"
 
-        # Validate XML files
-        echo "Validating XML files..."
-        find "$out/${name}" -name "*.xml" | while read -r xmlfile; do
-          echo "Checking $xmlfile..."
-          xmllint --noout "$xmlfile"
-        done
+          # Validate XML files
+          echo "Validating XML files..."
+          find "$out/${name}" -name "*.xml" | while read -r xmlfile; do
+            echo "Checking $xmlfile..."
+            xmllint --noout "$xmlfile"
+          done
 
-        # If schema checking is enabled, perform E2E database verification
-        if [ "${toString checkSchema}" = "1" ]; then
-          echo "Starting sandboxed PostgreSQL and Odoo schema validation..."
-          export PGDATA=$TMPDIR/postgres
-          export HOME=$TMPDIR
+          # If schema checking is enabled, perform E2E database verification
+          if [ "${toString checkSchema}" = "1" ]; then
+            echo "Starting sandboxed PostgreSQL and Odoo schema validation..."
+            export PGDATA=$TMPDIR/postgres
+            export HOME=$TMPDIR
           
-          # Initialize PostgreSQL database cluster
-          initdb --no-locale --encoding=UTF8 -U odoo_user
+            # Initialize PostgreSQL database cluster
+            initdb --no-locale --encoding=UTF8 -U odoo_user
           
-          # Configure PostgreSQL settings in postgresql.conf
-          # Using a unique subdirectory inside /tmp avoids socket file collisions
-          SOCKET_DIR=$(mktemp -d /tmp/pg-socket-XXXXXX)
-          echo "unix_socket_directories = '$SOCKET_DIR'" >> $PGDATA/postgresql.conf
-          echo "listen_addresses = '''" >> $PGDATA/postgresql.conf
+            # Configure PostgreSQL settings in postgresql.conf
+            # Using a unique subdirectory inside /tmp avoids socket file collisions
+            SOCKET_DIR=$(mktemp -d /tmp/pg-socket-XXXXXX)
+            echo "unix_socket_directories = '$SOCKET_DIR'" >> $PGDATA/postgresql.conf
+            echo "listen_addresses = '''" >> $PGDATA/postgresql.conf
           
-          # Start PostgreSQL server
-          pg_ctl start
+            # Start PostgreSQL server
+            pg_ctl start
           
-          # Create odoo database
-          createdb -h "$SOCKET_DIR" -U odoo_user -E UTF8 odoo
+            # Create odoo database
+            createdb -h "$SOCKET_DIR" -U odoo_user -E UTF8 odoo
           
-          # Run Odoo to install this module
-          odoo -d odoo \
-               --db_host="$SOCKET_DIR" \
-               --db_user=odoo_user \
-               --addons-path="$out" \
-               -i ${name} \
-               --stop-after-init
+            # Run Odoo to install this module
+            odoo -d odoo \
+                 --db_host="$SOCKET_DIR" \
+                 --db_user=odoo_user \
+                 --addons-path="$out" \
+                 -i ${name} \
+                 --stop-after-init
                
-          # Cleanly stop PostgreSQL
-          pg_ctl stop
-          echo "SUCCESS: Sandboxed database schema validation passed."
-        fi
+            # Cleanly stop PostgreSQL
+            pg_ctl stop
+            echo "SUCCESS: Sandboxed database schema validation passed."
+          fi
 
-        runHook postInstall
-      '';
-    };
+          runHook postInstall
+        '';
+      };
   mkOdooTheme =
-    {
-      name,
-      version ? "1.0.0",
-      depends ? [ "website" ],
-      scss ? null,
-      js ? null,
-      views ? null,
+    { name
+    , version ? "1.0.0"
+    , depends ? [ "website" ]
+    , scss ? null
+    , js ? null
+    , views ? null
+    , logo ? null
+    , favicon ? null
+    , primaryVariables ? null
+    , backend ? null
+    ,
     }:
     let
       scssPath = "static/src/scss/theme.scss";
       jsPath = "static/src/js/theme.js";
       viewsPath = "views/templates.xml";
+      primaryVariablesPath = "static/src/scss/primary_variables.scss";
+      backendPath = "static/src/scss/backend_brand.scss";
 
-      assetsList =
-        (lib.optional (scss != null) "${name}/${scssPath}")
-        ++ (lib.optional (js != null) "${name}/${jsPath}");
+      assets =
+        lib.optionalAttrs (scss != null || js != null)
+          {
+            "web.assets_frontend" =
+              (lib.optional (scss != null) "${name}/${scssPath}")
+              ++ (lib.optional (js != null) "${name}/${jsPath}");
+          }
+        // lib.optionalAttrs (primaryVariables != null) {
+          "web._assets_primary_variables" = [ "${name}/${primaryVariablesPath}" ];
+        }
+        // lib.optionalAttrs (backend != null) {
+          "web.assets_backend" = [ "${name}/${backendPath}" ];
+        };
 
       manifest = {
         name = name;
         version = version;
         depends = depends;
         data = lib.optional (views != null) viewsPath;
-        assets = lib.optionalAttrs (assetsList != [ ]) {
-          "web.assets_frontend" = assetsList;
-        };
+        assets = assets;
         installable = true;
         auto_install = false;
         application = false;
@@ -303,6 +321,30 @@ let
           cat <<'EOF' > "$out/${name}/${jsPath}"
           ${js}
           EOF
+        ''}
+
+        ${lib.optionalString (primaryVariables != null) ''
+          mkdir -p "$out/${name}/static/src/scss"
+          cat <<'EOF' > "$out/${name}/${primaryVariablesPath}"
+          ${primaryVariables}
+          EOF
+        ''}
+
+        ${lib.optionalString (backend != null) ''
+          mkdir -p "$out/${name}/static/src/scss"
+          cat <<'EOF' > "$out/${name}/${backendPath}"
+          ${backend}
+          EOF
+        ''}
+
+        ${lib.optionalString (logo != null) ''
+          mkdir -p "$out/${name}/static/src/img"
+          cp "${logo}" "$out/${name}/static/src/img/logo.svg"
+        ''}
+
+        ${lib.optionalString (favicon != null) ''
+          mkdir -p "$out/${name}/static/src/img"
+          cp "${favicon}" "$out/${name}/static/src/img/favicon.svg"
         ''}
 
         ${lib.optionalString (views != null) ''
